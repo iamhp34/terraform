@@ -4,7 +4,7 @@ pipeline {
     environment {
         AWS_ACCESS_KEY_ID     = credentials('AWS_ACCESS_KEY_ID')
         AWS_SECRET_ACCESS_KEY = credentials('AWS_SECRET_ACCESS_KEY')
-        AWS_DEFAULT_REGION    = 'us-east-1' 
+        AWS_DEFAULT_REGION    = 'ap-south-1' 
     }
     
     stages {
@@ -12,8 +12,8 @@ pipeline {
             steps {
                 // Pulls code from your repository
                 checkout scmGit(
-                    branches: [[name: 'main']], 
-                    userRemoteConfigs: [[url: 'https://github.com']]
+                    branches: [[name: 'master']], 
+                    userRemoteConfigs: [[url: 'https://github.com/iamhp34/terraform.git']]
                 )
             }
         }
