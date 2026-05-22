@@ -1,0 +1,122 @@
+trigger:
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  AWS_REGION: 'us-east-1'
+
+stages:
+
+  # ─────────────────────────────────────────────
+  # STAGE 1: Validate & Plan
+  # ─────────────────────────────────────────────
+  - stage: PlanStage
+    displayName: '📋 Init, Validate & Plan'
+    jobs:
+      - job: PlanJob
+        steps:
+
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: 'latest'
+
+          - task: AWSShellScript@1
+            displayName: 'Init → Validate → Plan'
+            inputs:
+              awsCredentials: 'AWS-Terraform-Connection'
+              regionName: $(AWS_REGION)
+              scriptType: inline
+              inlineScript: |
+                terraform init
+                terraform validate
+                terraform plan -out=tfplan
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Save plan artifact'
+            inputs:
+              targetPath: tfplan
+              artifact: tfplan
+
+  # ─────────────────────────────────────────────
+  # STAGE 2: Manual Approval Gate
+  # ─────────────────────────────────────────────
+  - stage: ApprovalStage
+    displayName: '🔐 Manual Approval'
+    dependsOn: PlanStage
+    jobs:
+      - job: WaitForApproval
+        pool: server                        # runs on Azure DevOps server, not an agent
+        steps:
+          - task: ManualValidation@0
+            displayName: 'Approve to Apply'
+            timeoutInMinutes: 60            # auto-reject after 60 min if no response
+            inputs:
+              notifyUsers: 'iamhp34@gmail.com'
+              instructions: 'Plan complete. Review Stage 1 logs then approve to create EC2.'
+
+  # ─────────────────────────────────────────────
+  # STAGE 3: Apply
+  # ─────────────────────────────────────────────
+  - stage: ApplyStage
+    displayName: '🚀 Terraform Apply'
+    dependsOn: ApprovalStage
+    jobs:
+      - job: ApplyJob
+        steps:
+
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: 'latest'
+
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download plan artifact'
+            inputs:
+              artifact: tfplan
+              path: $(System.DefaultWorkingDirectory)
+
+          - task: AWSShellScript@1
+            displayName: 'Terraform Apply'
+            inputs:
+              awsCredentials: 'AWS-Terraform-Connection'
+              regionName: $(AWS_REGION)
+              scriptType: inline
+              inlineScript: |
+                terraform init
+                terraform apply -auto-approve tfplan
+
+  # ─────────────────────────────────────────────
+  # STAGE 4: Wait 5 min → Destroy
+  # ─────────────────────────────────────────────
+  - stage: DestroyStage
+    displayName: '💣 Wait 5 min → Auto Destroy'
+    dependsOn: ApplyStage
+    condition: succeeded()
+    jobs:
+      - job: DestroyJob
+        timeoutInMinutes: 15
+        steps:
+
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: 'latest'
+
+          - task: AWSShellScript@1
+            displayName: 'Wait 5 min then Destroy'
+            inputs:
+              awsCredentials: 'AWS-Terraform-Connection'
+              regionName: $(AWS_REGION)
+              scriptType: inline
+              inlineScript: |
+                terraform init
+                echo "EC2 is live. Waiting 5 minutes..."
+                for i in 5 4 3 2 1; do
+                  echo "  Destroying in ${i} minute(s)..."
+                  sleep 60
+                done
+                echo "Destroying now..."
+                terraform destroy -auto-approve
